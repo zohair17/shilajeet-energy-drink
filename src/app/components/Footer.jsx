@@ -53,14 +53,14 @@ const POLICY_LINKS = [
 
 export default function Footer() {
   return (
-    <footer className="relative w-full text-white z-10 bg-[#1f1f1f] pt-20 md:pt-24 pb-8 px-6 md:px-12 lg:px-16">
-      <div className="mx-auto max-w-[1320px] grid grid-cols-1 md:grid-cols-3 gap-12 lg:gap-16">
+    <footer className="relative w-full text-white z-10 bg-[#1f1f1f] pt-14 md:pt-24 pb-8 px-5 md:px-12 lg:px-16 mb-safe">
+      <div className="mx-auto max-w-[1320px] grid grid-cols-1 md:grid-cols-3 gap-10 md:gap-12 lg:gap-16">
         {/* Column 1 — Quick Links */}
         <div>
-          <h4 className="font-black uppercase tracking-[0.04em] text-2xl mb-7">
+          <h4 className="font-black uppercase tracking-[0.04em] text-xl md:text-2xl mb-5 md:mb-7">
             Quick Links
           </h4>
-          <ul className="flex flex-col gap-4">
+          <ul className="flex flex-col gap-3.5 md:gap-4">
             {QUICK_LINKS.map((label) => (
               <li key={label}>
                 <a
@@ -76,20 +76,20 @@ export default function Footer() {
 
         {/* Column 2 — Connectivity (payment methods) */}
         <div>
-          <h4 className="font-black uppercase tracking-[0.04em] text-2xl mb-7">
+          <h4 className="font-black uppercase tracking-[0.04em] text-xl md:text-2xl mb-5 md:mb-7">
             Connectivity
           </h4>
-          <div className="flex flex-wrap gap-2.5 max-w-[420px]">
+          <div className="flex flex-wrap gap-2 md:gap-2.5 max-w-[420px]">
             {PAYMENTS.map(({ label, Icon }) => (
               <span
                 key={label}
                 role="img"
                 aria-label={label}
                 title={label}
-                className="inline-flex items-center justify-center w-12 h-8 rounded-md bg-white text-[#1a1a1a]"
+                className="inline-flex items-center justify-center w-11 h-7 md:w-12 md:h-8 rounded-md bg-white text-[#1a1a1a]"
                 style={{ boxShadow: "0 2px 6px rgba(0,0,0,0.25)" }}
               >
-                <Icon className="w-7 h-7" />
+                <Icon className="w-6 h-6 md:w-7 md:h-7" />
               </span>
             ))}
           </div>
@@ -97,7 +97,7 @@ export default function Footer() {
 
         {/* Column 3 — Support */}
         <div>
-          <h4 className="font-black uppercase tracking-[0.04em] text-2xl mb-7">
+          <h4 className="font-black uppercase tracking-[0.04em] text-xl md:text-2xl mb-5 md:mb-7">
             Support
           </h4>
           <a
@@ -122,7 +122,7 @@ export default function Footer() {
       </div>
 
       {/* Bottom bar */}
-      <div className="mx-auto max-w-[1320px] mt-16 md:mt-20 pt-7 border-t border-white/10 flex flex-col lg:flex-row items-center justify-between gap-4">
+      <div className="mx-auto max-w-[1320px] mt-12 md:mt-20 pt-7 border-t border-white/10 flex flex-col lg:flex-row items-center justify-between gap-4">
         <p className="text-white/55 text-xs tracking-wide text-center lg:text-left">
           {new Date().getFullYear()} Shilajit Energy Drinks. All rights reserved
           &nbsp;|&nbsp; Powered by Shopify

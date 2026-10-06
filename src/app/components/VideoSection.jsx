@@ -3,6 +3,7 @@
 import { useEffect, useRef } from "react";
 import gsap from "gsap";
 import { ScrollTrigger } from "gsap/ScrollTrigger";
+import useIsMobile from "./useIsMobile";
 
 // Premium full-bleed video section.
 //
@@ -15,16 +16,24 @@ export default function VideoSection({
   mode = "pin",
   pinDuration = "+=100%",
   scrubDuration = "+=200%",
+  // Phones hold a pin for far more thumb-travel than a wheel does, so both
+  // windows are shortened there unless a caller overrides them.
+  mobilePinDuration = "+=65%",
+  mobileScrubDuration = "+=130%",
 }) {
   const sectionRef = useRef(null);
   const videoRef = useRef(null);
+  const isMobile = useIsMobile();
 
   useEffect(() => {
     if (!sectionRef.current || !videoRef.current) return;
     gsap.registerPlugin(ScrollTrigger);
 
     const video = videoRef.current;
+    const pinEnd = isMobile ? mobilePinDuration : pinDuration;
+    const scrubEnd = isMobile ? mobileScrubDuration : scrubDuration;
     let cleanupMeta;
+    let cleanupGesture;
 
     const ctx = gsap.context(() => {
       if (mode === "scrub") {
@@ -36,7 +45,7 @@ export default function VideoSection({
           ScrollTrigger.create({
             trigger: sectionRef.current,
             start: "top top",
-            end: scrubDuration,
+            end: scrubEnd,
             pin: true,
             scrub: 1,
             anticipatePin: 1,
@@ -69,7 +78,7 @@ export default function VideoSection({
         ScrollTrigger.create({
           trigger: sectionRef.current,
           start: "top top",
-          end: pinDuration,
+          end: pinEnd,
           pin: true,
           pinSpacing: true,
           anticipatePin: 1,
@@ -81,19 +90,41 @@ export default function VideoSection({
           if (p && typeof p.catch === "function") p.catch(() => {});
         };
         tryPlay();
+
+        // iOS refuses muted autoplay in Low Power Mode, and some Android
+        // browsers refuse it on a metered connection — in both cases the
+        // section would sit on a frozen first frame. Retry once on the first
+        // user gesture, which is all those policies actually require.
+        const onFirstGesture = () => {
+          if (video.paused) tryPlay();
+        };
+        window.addEventListener("touchstart", onFirstGesture, { once: true, passive: true });
+        window.addEventListener("click", onFirstGesture, { once: true });
+        cleanupGesture = () => {
+          window.removeEventListener("touchstart", onFirstGesture);
+          window.removeEventListener("click", onFirstGesture);
+        };
       }
     });
 
     return () => {
       if (cleanupMeta) cleanupMeta();
+      if (cleanupGesture) cleanupGesture();
       ctx.revert();
     };
-  }, [mode, pinDuration, scrubDuration]);
+  }, [
+    mode,
+    pinDuration,
+    scrubDuration,
+    mobilePinDuration,
+    mobileScrubDuration,
+    isMobile,
+  ]);
 
   return (
     <section
       ref={sectionRef}
-      className="relative w-full h-screen overflow-hidden z-10 bg-black"
+      className="relative w-full h-[100svh] md:h-screen overflow-hidden z-10 bg-black"
     >
       <video
         ref={videoRef}
@@ -115,14 +146,11 @@ export default function VideoSection({
 
       {/* Optional headline anchor — leave the content slot here so the section
           stays a single semantic block. Add a centered tagline by composing on top. */}
-      <div className="relative z-10 w-full h-full flex items-end justify-center pb-20 md:pb-24">
-        <div className="max-w-[1320px] w-full px-6 md:px-12 lg:px-16 text-center">
+      <div className="relative z-10 w-full h-full flex items-end justify-center pb-14 md:pb-24 mb-safe">
+        <div className="max-w-[1320px] w-full px-5 md:px-12 lg:px-16 text-center">
           <p
-            className="uppercase font-black text-white tracking-[-0.02em] leading-[0.95]"
-            style={{
-              fontSize: "clamp(36px, 5.5vw, 80px)",
-              textShadow: "0 10px 40px rgba(0,0,0,0.6)",
-            }}
+            className="uppercase font-black text-white tracking-[-0.02em] leading-[0.95] text-[clamp(26px,7.5vw,40px)] md:text-[clamp(36px,5.5vw,80px)]"
+            style={{ textShadow: "0 10px 40px rgba(0,0,0,0.6)" }}
           >
             Born From The Mountain.
             <br />

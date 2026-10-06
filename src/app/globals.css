@@ -33,3 +33,46 @@ html, body, #__next {
 ::-webkit-scrollbar-track { background: #0a0a0a; }
 ::-webkit-scrollbar-thumb { background: #2a2a2a; border-radius: 6px; }
 ::-webkit-scrollbar-thumb:hover { background: #3a3a3a; }
+
+/* --- Mobile hardening -------------------------------------------------- */
+/* Landscape rotation on iOS otherwise inflates text inside the pinned,
+   transform-driven sections. */
+html {
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
+/* The hero carousel and the benefits tags animate in from far off-canvas; the
+   sections clip them, and this stops any sub-pixel rounding from still handing
+   a phone a horizontal scrollbar (which would also fight GSAP ScrollTrigger).
+   Body only, deliberately: html already carries height:100%, and giving it any
+   overflow value turns it into a fixed, 100%-tall scroll container, which stops
+   the page scrolling altogether. */
+body {
+  overflow-x: hidden;
+  overscroll-behavior-x: none;
+}
+
+@media (max-width: 767px) {
+  /* Overlay scrollbars on touch — a 10px gutter is desktop-only chrome. */
+  ::-webkit-scrollbar {
+    width: 0;
+    height: 0;
+  }
+}
+
+/* Safe-area helpers for the pinned hero UI (pagination, mobile menu) so they
+   clear the notch / home indicator when `viewportFit: cover` is in effect. */
+.pb-safe {
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+.pt-safe {
+  padding-top: env(safe-area-inset-top, 0px);
+}
+
+/* Additive variant: use where an element already carries a padding utility,
+   since .pb-safe would otherwise replace it. */
+.mb-safe {
+  margin-bottom: env(safe-area-inset-bottom, 0px);
+}

@@ -5,7 +5,7 @@ import Image from "next/image";
 import { AnimatePresence, motion } from "framer-motion";
 import gsap from "gsap";
 import { ScrollTrigger } from "gsap/ScrollTrigger";
-import Hero, { FLAVORS } from "./Hero";
+import Hero, { FLAVORS, canBoxFor } from "./Hero";
 import FeaturesSection from "./FeaturesSection";
 import BenefitsSection from "./BenefitsSection";
 import ShopNowSection from "./ShopNowSection";
@@ -13,17 +13,33 @@ import AboutProductSection from "./AboutProductSection";
 import IngredientsSection from "./IngredientsSection";
 import VideoSection from "./VideoSection";
 import Footer from "./Footer";
+import useIsMobile from "./useIsMobile";
 
 const DARK = "#12130F";
 
 const gradientFor = (f) =>
   `radial-gradient(120% 85% at 50% -5%, ${f.bg[0]} 0%, ${f.bg[0]}d9 22%, ${f.bg[1]} 72%)`;
 
+// Per-device tuning of the shared can journey.
+//   morphIn / morphOut  — how far above a section top (in viewport heights) the
+//                         morph starts and finishes.
+//   tilt                — peak rotation, softened on phones where the can is
+//                         proportionally wider and a 12deg tilt reads as a lean.
+//   travelScale         — size while parked in the features/benefits slots.
+// Phones stack the two-column sections, so the can has further to travel and a
+// wider window keeps the movement from feeling like a snap.
+const JOURNEY = {
+  desktop: { morphIn: 0.6, morphOut: 0.1, tilt: 12, travelScale: 0.88 },
+  mobile: { morphIn: 0.85, morphOut: 0.22, tilt: 7, travelScale: 0.82 },
+};
+
 export default function LandingExperience() {
   const [active, setActive] = useState(1);
   const flavor = FLAVORS[active];
+  const isMobile = useIsMobile();
+  const canBox = canBoxFor(isMobile);
 
-  // Direction tracking for the shared can's slide-in. Computed during render so
+  // Direction tracking for the shared can slide-in. Computed during render so
   // AnimatePresence reads the correct value the same tick the key changes —
   // otherwise the incoming can would flash at its destination before the slide.
   const prevActiveRef = useRef(active);
@@ -63,19 +79,46 @@ export default function LandingExperience() {
     });
   }, []);
 
-  // Unified master timeline — one ScrollTrigger drives the can's entire journey
+  // Mobile browsers fire a resize every time the URL bar collapses or expands.
+  // Left alone that re-measures every pinned trigger mid-scroll and makes the
+  // pinned sections jump, so ScrollTrigger is told to ignore those, and a real
+  // layout change (rotation, breakpoint crossing) refreshes explicitly instead.
+  useEffect(() => {
+    gsap.registerPlugin(ScrollTrigger);
+    ScrollTrigger.config({ ignoreMobileResize: true });
+
+    const refresh = () => ScrollTrigger.refresh();
+    window.addEventListener("orientationchange", refresh);
+    return () => window.removeEventListener("orientationchange", refresh);
+  }, []);
+
+  // Sizes, tilts, and morph windows all change at the breakpoint, so the whole
+  // journey is re-measured once `isMobile` settles.
+  useEffect(() => {
+    ScrollTrigger.refresh();
+  }, [isMobile]);
+
+  // Unified master timeline — one ScrollTrigger drives the can entire journey
   // across all three sections. Phases:
   //   A. Hero        → can at viewport center, no tilt
-  //   B. Features-in → lerp center → features slot, rotate 0 → -12, scale 1 → 0.88
+  //   B. Features-in → lerp center → features slot, rotate 0 → -tilt, scale down
   //   C. Features    → stick to features slot (tracks it as it scrolls)
-  //   D. Benefits-in → lerp features slot → benefits slot, rotate -12 → +12
+  //   D. Benefits-in → lerp features slot → benefits slot, rotate -tilt → +tilt
   //   E. Benefits    → stick to benefits slot
-  //   F. Shop-in     → drop benefits slot → shop menu slot, rotate +12 → 0,
+  //   F. Shop-in     → drop benefits slot → shop menu slot, rotate +tilt → 0,
   //                    scale down to fit the small product-card slot
   //   G. Shop        → stick to the first menu slot
+  //
+  // Every anchor is read live from getBoundingClientRect, so the same code
+  // drives the two-column desktop layout and the stacked mobile one — only the
+  // window widths, tilt, and travel scale come from JOURNEY.
   useEffect(() => {
     if (!canRef.current || !wrapperRef.current) return;
     gsap.registerPlugin(ScrollTrigger);
+
+    const { morphIn, morphOut, tilt, travelScale } = isMobile
+      ? JOURNEY.mobile
+      : JOURNEY.desktop;
 
     const ctx = gsap.context(() => {
       ScrollTrigger.create({
@@ -105,12 +148,12 @@ export default function LandingExperience() {
           const sTop = sSection.offsetTop;
 
           // Morph windows
-          const fStart = fTop - 0.6 * vh;
-          const fEnd = fTop - 0.1 * vh;
-          const bStart = bTop - 0.6 * vh;
-          const bEnd = bTop - 0.1 * vh;
-          const sStart = sTop - 0.6 * vh;
-          const sEnd = sTop - 0.1 * vh;
+          const fStart = fTop - morphIn * vh;
+          const fEnd = fTop - morphOut * vh;
+          const bStart = bTop - morphIn * vh;
+          const bEnd = bTop - morphOut * vh;
+          const sStart = sTop - morphIn * vh;
+          const sEnd = sTop - morphOut * vh;
 
           // Live slot positions
           const fRect = fSlot.getBoundingClientRect();
@@ -124,7 +167,7 @@ export default function LandingExperience() {
           const sY = sRect.top + sRect.height / 2 - vpCenterY;
 
           // Scale that shrinks the full-size can down to the small product-card
-          // slot, derived live from the slot's rendered height.
+          // slot, derived live from the slot rendered height.
           const canH = canEl.offsetHeight || 1;
           const sScale = sRect.height / canH;
 
@@ -138,28 +181,28 @@ export default function LandingExperience() {
             const p = (scrollY - fStart) / (fEnd - fStart);
             x = fX * p;
             y = fY * p;
-            rotate = -12 * p;
-            scale = 1 - 0.12 * p;
+            rotate = -tilt * p;
+            scale = 1 - (1 - travelScale) * p;
           } else if (scrollY < bStart) {
             // Phase C
-            x = fX; y = fY; rotate = -12; scale = 0.88;
+            x = fX; y = fY; rotate = -tilt; scale = travelScale;
           } else if (scrollY < bEnd) {
             // Phase D — slot positions are live, so this also tracks the scroll
             const p = (scrollY - bStart) / (bEnd - bStart);
             x = fX + (bX - fX) * p;
             y = fY + (bY - fY) * p;
-            rotate = -12 + 24 * p;
-            scale = 0.88;
+            rotate = -tilt + 2 * tilt * p;
+            scale = travelScale;
           } else if (scrollY < sStart) {
             // Phase E
-            x = bX; y = bY; rotate = 12; scale = 0.88;
+            x = bX; y = bY; rotate = tilt; scale = travelScale;
           } else if (scrollY < sEnd) {
             // Phase F — drop from benefits slot into the first menu slot
             const p = (scrollY - sStart) / (sEnd - sStart);
             x = bX + (sX - bX) * p;
             y = bY + (sY - bY) * p;
-            rotate = 12 - 12 * p;
-            scale = 0.88 + (sScale - 0.88) * p;
+            rotate = tilt - tilt * p;
+            scale = travelScale + (sScale - travelScale) * p;
           } else {
             // Phase G — parked as the first product in the menu grid
             x = sX; y = sY; rotate = 0; scale = sScale;
@@ -171,7 +214,7 @@ export default function LandingExperience() {
     });
 
     return () => ctx.revert();
-  }, []);
+  }, [isMobile]);
 
   return (
     <div
@@ -215,13 +258,15 @@ export default function LandingExperience() {
       <VideoSection mode="pin" />
       <Footer accent={flavor.bg[0]} />
 
-      {/* SHARED MORPHING CAN — single DOM element shared across all sections */}
+      {/* SHARED MORPHING CAN — single DOM element shared across all sections.
+          Its box matches the hero carousel slot box exactly (see CAN_BOX in
+          Hero) so the hand-off between the two is seamless at any width. */}
       <div
         ref={canRef}
         className="fixed top-1/2 left-1/2 z-[25] pointer-events-none"
         style={{
-          width: "min(38vw, 460px)",
-          height: "min(78vh, 740px)",
+          width: canBox.width,
+          height: canBox.height,
           willChange: "transform",
         }}
       >
@@ -248,7 +293,7 @@ export default function LandingExperience() {
               alt={flavor.name}
               fill
               priority
-              sizes="(max-width: 768px) 70vw, 460px"
+              sizes="(max-width: 767px) 68vw, 460px"
               draggable={false}
               style={{
                 objectFit: "contain",

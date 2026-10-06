@@ -24,6 +24,16 @@ export const metadata = {
     "Premium energy drinks crafted with Shilajit, Fulvic Acid, and Saffron. Explore five immersive flavors.",
 };
 
+// `viewportFit: "cover"` lets the full-bleed hero/video run under the notch and
+// the home indicator; the safe-area insets are re-added where content would
+// otherwise sit beneath them (see globals.css).
+export const viewport = {
+  width: "device-width",
+  initialScale: 1,
+  viewportFit: "cover",
+  themeColor: "#12130F",
+};
+
 export default function RootLayout({ children }) {
   return (
     <html

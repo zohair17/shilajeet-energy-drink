@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import Image from "next/image";
 import {
   motion,
@@ -9,13 +10,27 @@ import {
   useSpring,
   useTransform,
 } from "framer-motion";
-import { ChevronLeft, ChevronRight } from "lucide-react";
+import { ChevronLeft, ChevronRight, X } from "lucide-react";
 import gsap from "gsap";
 import { ScrollTrigger } from "gsap/ScrollTrigger";
+import useIsMobile from "./useIsMobile";
 
 const FRUITS = "/asset/Hero%20background";
 const BOTTLES = "/asset/bottles";
 const DARK = "#12130F";
+
+// Box the can is rendered into, per device. Exported because LandingExperience
+// renders the *shared* morphing can, and it must occupy exactly the same box as
+// this carousel slot or the hand-off would jump on flavor change. The mobile box
+// keeps the desktop aspect (~0.62) so the artwork reads at the same relative
+// size, and uses `svh` so a collapsing mobile URL bar cannot resize the can.
+export const CAN_BOX = {
+  desktop: { width: "min(38vw, 460px)", height: "min(78vh, 740px)" },
+  mobile: { width: "min(68vw, 320px)", height: "min(54svh, 470px)" },
+};
+
+export const canBoxFor = (isMobile) =>
+  isMobile ? CAN_BOX.mobile : CAN_BOX.desktop;
 
 export const FLAVORS = [
   {
@@ -61,7 +76,7 @@ export const FLAVORS = [
         offsetY: 50, },
       { src: `${FRUITS}/pineapple.png`, anchor: "top-left", size: 40, depth: 46,offsetX: 80,
         offsetY: 50, },
-    
+
     ],
   },
   {
@@ -106,12 +121,21 @@ const NAV_LINKS = [
 // NOTE: `center` is intentionally opacity 0 — the actual active can is rendered
 // by LandingExperience as a single shared element across both sections, so this
 // slot only reserves space and handles the slide-out/in for the carousel peeks.
-const SLOT_VARIANTS = {
-  center: { x: "0vw", scale: 1.00, opacity: 0, filter: "blur(0px)", zIndex: 4 },
-  right: { x: "52vw", scale: 0.58, opacity: 0.85, filter: "blur(1px)", zIndex: 3 },
-  left: { x: "-52vw", scale: 0.58, opacity: 0.85, filter: "blur(1px)", zIndex: 3 },
-  hiddenRight: { x: "140vw", scale: 0.40, opacity: 0, filter: "blur(6px)", zIndex: 1 },
-  hiddenLeft: { x: "-140vw", scale: 0.40, opacity: 0, filter: "blur(6px)", zIndex: 1 },
+//
+// Offsets are device-scaled: the mobile can is proportionally wider (64vw vs
+// 38vw), so its neighbours must travel further out — and shrink further — to
+// leave the centre can readable on a phone.
+const slotVariantsFor = (isMobile) => {
+  const peek = isMobile ? 62 : 52;
+  const peekScale = isMobile ? 0.46 : 0.58;
+  const hidden = isMobile ? 150 : 140;
+  return {
+    center: { x: "0vw", scale: 1.0, opacity: 0, filter: "blur(0px)", zIndex: 4 },
+    right: { x: `${peek}vw`, scale: peekScale, opacity: 0.85, filter: "blur(1px)", zIndex: 3 },
+    left: { x: `-${peek}vw`, scale: peekScale, opacity: 0.85, filter: "blur(1px)", zIndex: 3 },
+    hiddenRight: { x: `${hidden}vw`, scale: 0.4, opacity: 0, filter: "blur(6px)", zIndex: 1 },
+    hiddenLeft: { x: `-${hidden}vw`, scale: 0.4, opacity: 0, filter: "blur(6px)", zIndex: 1 },
+  };
 };
 
 const ANCHOR_POSITIONS = {
@@ -120,6 +144,16 @@ const ANCHOR_POSITIONS = {
   "bottom-left": { left: "6vw", bottom: "12vh", originX: "left", originY: "bottom" },
   "bottom-right": { right: "6vw", bottom: "12vh", originX: "right", originY: "bottom" },
   "top-center": { left: "50%", top: "10vh", originX: "center", originY: "top", translateX: "-50%" },
+};
+
+// Same key set as the desktop table (so the "unknown anchor falls back to
+// top-left" behaviour stays identical), pulled tighter and switched to `svh`.
+const ANCHOR_POSITIONS_MOBILE = {
+  "top-left": { left: "2vw", top: "11svh", originX: "left", originY: "top" },
+  "top-right": { right: "2vw", top: "11svh", originX: "right", originY: "top" },
+  "bottom-left": { left: "2vw", bottom: "9svh", originX: "left", originY: "bottom" },
+  "bottom-right": { right: "2vw", bottom: "9svh", originX: "right", originY: "bottom" },
+  "top-center": { left: "50%", top: "8svh", originX: "center", originY: "top", translateX: "-50%" },
 };
 
 const slotFor = (i, active, total) => {
@@ -132,6 +166,7 @@ const slotFor = (i, active, total) => {
 
 export default function Hero({ active: activeProp, setActive: setActiveProp } = {}) {
   const total = FLAVORS.length;
+  const isMobile = useIsMobile();
   const [internalActive, setInternalActive] = useState(1);
   const active = activeProp ?? internalActive;
   const setActive = setActiveProp ?? setInternalActive;
@@ -170,6 +205,29 @@ export default function Hero({ active: activeProp, setActive: setActiveProp } = 
     return () => window.removeEventListener("keydown", onKey);
   }, [goPrev, goNext]);
 
+  // Touch equivalent of the arrow keys and arrow buttons. A horizontal swipe
+  // only counts when it clearly out-runs the vertical component, so it never
+  // steals a vertical scroll gesture from the page.
+  const touchRef = useRef(null);
+  const onTouchStart = useCallback((e) => {
+    const t = e.touches[0];
+    touchRef.current = { x: t.clientX, y: t.clientY };
+  }, []);
+  const onTouchEnd = useCallback(
+    (e) => {
+      const start = touchRef.current;
+      if (!start) return;
+      touchRef.current = null;
+      const t = e.changedTouches[0];
+      const dx = t.clientX - start.x;
+      const dy = t.clientY - start.y;
+      if (Math.abs(dx) < 45 || Math.abs(dx) < Math.abs(dy) * 1.4) return;
+      if (dx < 0) goNext();
+      else goPrev();
+    },
+    [goNext, goPrev]
+  );
+
   useEffect(() => {
     if (!sectionRef.current) return;
     gsap.registerPlugin(ScrollTrigger);
@@ -189,7 +247,9 @@ export default function Hero({ active: activeProp, setActive: setActiveProp } = 
         delay: 0.15,
       });
       gsap.to(titleRef.current, {
-        yPercent: -28,
+        // Gentler parallax on phones: the hero is shorter there, so the full
+        // -28% would drag the title out of the visible band too early.
+        yPercent: isMobile ? -16 : -28,
         ease: "none",
         scrollTrigger: {
           trigger: sectionRef.current,
@@ -200,17 +260,19 @@ export default function Hero({ active: activeProp, setActive: setActiveProp } = 
       });
     }, sectionRef);
     return () => ctx.revert();
-  }, []);
+  }, [isMobile]);
 
   return (
     <section
       ref={sectionRef}
-      className="relative w-full h-screen min-h-[680px] overflow-hidden font-sans select-none z-10"
+      className="relative w-full h-[100svh] min-h-[560px] md:h-screen md:min-h-[680px] overflow-hidden font-sans select-none z-10"
       onMouseMove={onMouseMove}
+      onTouchStart={onTouchStart}
+      onTouchEnd={onTouchEnd}
     >
-      <HollowTitle flavor={flavor} titleRef={titleRef} />
-      <FloatingFruits flavor={flavor} sx={sx} sy={sy} />
-      <CansCarousel active={active} total={total} stageRef={stageRef} />
+      <HollowTitle flavor={flavor} titleRef={titleRef} isMobile={isMobile} />
+      <FloatingFruits flavor={flavor} sx={sx} sy={sy} isMobile={isMobile} />
+      <CansCarousel active={active} total={total} stageRef={stageRef} isMobile={isMobile} />
       <Header />
       <NavControls onPrev={goPrev} onNext={goNext} />
       <Pagination active={active} setActive={setActive} />
@@ -218,16 +280,20 @@ export default function Hero({ active: activeProp, setActive: setActiveProp } = 
   );
 }
 
-function HollowTitle({ flavor, titleRef }) {
+function HollowTitle({ flavor, titleRef, isMobile }) {
   // Fluid sizing that scales DOWN for longer names so nothing ever clips.
   // Multiplier is calibrated so "PINEAPPLE GUAVA" (15 chars) still fits inside
-  // a 92vw safe area at the upper bound.
+  // a 92vw safe area at the upper bound. Phones need their own calibration:
+  // the 40px desktop floor alone would overflow 15 characters on a 360px
+  // screen, so the floor drops to 22px and the fluid term is re-tuned.
   const len = Math.max(flavor.name.length, 8);
-  const fluidVw = Math.min(13, 150 / len);
-  const fontSize = `clamp(40px, ${fluidVw.toFixed(2)}vw, 200px)`;
+  const fluidVw = isMobile ? Math.min(11, 108 / len) : Math.min(13, 150 / len);
+  const fontSize = isMobile
+    ? `clamp(22px, ${fluidVw.toFixed(2)}vw, 64px)`
+    : `clamp(40px, ${fluidVw.toFixed(2)}vw, 200px)`;
 
   return (
-    <div className="absolute inset-0 z-0 flex items-center justify-center pointer-events-none px-6">
+    <div className="absolute inset-0 z-0 flex items-center justify-center pointer-events-none px-4 md:px-6">
       <div
         ref={titleRef}
         className="w-full max-w-[92vw] flex items-center justify-center"
@@ -235,24 +301,24 @@ function HollowTitle({ flavor, titleRef }) {
         {/* initial={false} makes the very first child mount in its `animate`
             state (opacity 1) instead of running the entry fade. This is critical
             because the parent runs `gsap.from(".hero-entrance", { opacity: 0 })`
-            in a useEffect: gsap.from() reads the element's *current* opacity as
-            the tween's destination, so if framer-motion has already set the
-            initial state to opacity 0, GSAP captures 0 and the title stays
-            invisible until the next slider click forces a fresh mount.
-            initial={false} sidesteps that collision on first paint while still
-            letting subsequent flavor changes use the full enter animation. */}
+            in a useEffect: gsap.from() reads the element current opacity as the
+            tween destination, so if framer-motion has already set the initial
+            state to opacity 0, GSAP captures 0 and the title stays invisible
+            until the next slider click forces a fresh mount. initial={false}
+            sidesteps that collision on first paint while still letting
+            subsequent flavor changes use the full enter animation. */}
         <AnimatePresence mode="wait" initial={false}>
           <motion.h2
             key={flavor.id}
-            initial={{ opacity: 0, y: 50, letterSpacing: "0.12em" }}
+            initial={{ opacity: 0, y: isMobile ? 28 : 50, letterSpacing: "0.12em" }}
             animate={{ opacity: 1, y: 0, letterSpacing: "-0.045em" }}
-            exit={{ opacity: 0, y: -50, letterSpacing: "0.12em" }}
+            exit={{ opacity: 0, y: isMobile ? -28 : -50, letterSpacing: "0.12em" }}
             transition={{ duration: 0.75, ease: [0.22, 0.61, 0.36, 1] }}
             className="whitespace-nowrap font-black uppercase text-center hero-entrance leading-none"
             style={{
               fontSize,
               color: "transparent",
-              WebkitTextStroke: `1.5px ${flavor.bg[0]}`,
+              WebkitTextStroke: `${isMobile ? "1px" : "1.5px"} ${flavor.bg[0]}`,
               textShadow: `0 0 80px ${flavor.bg[0]}66, 0 0 24px ${flavor.bg[0]}44`,
               transform: "translateY(-6%)",
             }}
@@ -265,7 +331,7 @@ function HollowTitle({ flavor, titleRef }) {
   );
 }
 
-function FloatingFruits({ flavor, sx, sy }) {
+function FloatingFruits({ flavor, sx, sy, isMobile }) {
   const backFruits = flavor.fruits.slice(0, Math.ceil(flavor.fruits.length / 2));
   const frontFruits = flavor.fruits.slice(Math.ceil(flavor.fruits.length / 2));
 
@@ -304,6 +370,7 @@ function FloatingFruits({ flavor, sx, sy }) {
                 sx={sx}
                 sy={sy}
                 index={idx}
+                isMobile={isMobile}
               />
             ))}
           </motion.div>
@@ -338,6 +405,7 @@ function FloatingFruits({ flavor, sx, sy }) {
                 sx={sx}
                 sy={sy}
                 index={idx}
+                isMobile={isMobile}
               />
             ))}
           </motion.div>
@@ -347,14 +415,23 @@ function FloatingFruits({ flavor, sx, sy }) {
   );
 }
 
-function FloatingFruit({ fruit, sx, sy, index }) {
-  const anchor = ANCHOR_POSITIONS[fruit.anchor] || ANCHOR_POSITIONS["top-left"];
+function FloatingFruit({ fruit, sx, sy, index, isMobile }) {
+  const table = isMobile ? ANCHOR_POSITIONS_MOBILE : ANCHOR_POSITIONS;
+  const anchor = table[fruit.anchor] || table["top-left"];
   // const px = useTransform(sx, (v) => v * fruit.depth);
   // const py = useTransform(sy, (v) => v * fruit.depth);
 
-  // Convert size (number expressed in vw) to a responsive clamp() to prevent
-  // the asset from ballooning on ultra-wide displays.
-  const sizeCss = `clamp(180px, ${fruit.size}vw, ${fruit.size * 12}px)`;
+  // Convert size (a number expressed in vw) to a responsive clamp() so the
+  // asset never balloons on ultra-wide displays. On phones the 180px floor is
+  // the opposite problem — half the screen — so it drops, and the ceiling is
+  // capped at 200px instead of the desktop size*12.
+  const sizeCss = isMobile
+    ? `clamp(96px, ${fruit.size}vw, 200px)`
+    : `clamp(180px, ${fruit.size}vw, ${fruit.size * 12}px)`;
+
+  // The authored offsets are pixel nudges tuned against a desktop-width stage;
+  // at phone width they would shove the artwork off-canvas, so they scale down.
+  const nudge = isMobile ? 0.45 : 1;
 
   return (
     <motion.div
@@ -363,8 +440,8 @@ function FloatingFruit({ fruit, sx, sy, index }) {
         ...anchor,
         width: sizeCss,
         height: sizeCss,
-        x: fruit.offsetX || 0,
-        y: fruit.offsetY || 0,
+        x: (fruit.offsetX || 0) * nudge,
+        y: (fruit.offsetY || 0) * nudge,
         ...(anchor.translateX ? { translateX: anchor.translateX } : null),
         willChange: "transform",
       }}
@@ -387,7 +464,7 @@ function FloatingFruit({ fruit, sx, sy, index }) {
           src={fruit.src}
           alt=""
           fill
-          sizes="50vw"
+          sizes="(max-width: 767px) 55vw, 50vw"
           draggable={false}
           style={{
             objectFit: "contain",
@@ -399,7 +476,10 @@ function FloatingFruit({ fruit, sx, sy, index }) {
   );
 }
 
-function CansCarousel({ active, total, stageRef }) {
+function CansCarousel({ active, total, stageRef, isMobile }) {
+  const box = canBoxFor(isMobile);
+  const variants = slotVariantsFor(isMobile);
+
   return (
     <div ref={stageRef} className="absolute inset-0 z-20 pointer-events-none hero-stage">
       {FLAVORS.map((f, i) => {
@@ -408,7 +488,7 @@ function CansCarousel({ active, total, stageRef }) {
           <motion.div
             key={f.id}
             initial={false}
-            animate={SLOT_VARIANTS[slot]}
+            animate={variants[slot]}
             transition={{
               duration: 0.95,
               ease: [0.22, 0.61, 0.36, 1],
@@ -417,8 +497,8 @@ function CansCarousel({ active, total, stageRef }) {
             }}
             className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2"
             style={{
-              width: "min(38vw, 460px)",
-              height: "min(78vh, 740px)",
+              width: box.width,
+              height: box.height,
               willChange: "transform, opacity",
             }}
           >
@@ -428,7 +508,7 @@ function CansCarousel({ active, total, stageRef }) {
                 alt={f.name}
                 fill
                 priority={i === active}
-                sizes="(max-width: 768px) 70vw, 460px"
+                sizes="(max-width: 767px) 68vw, 460px"
                 draggable={false}
                 style={{
                   objectFit: "contain",
@@ -444,10 +524,30 @@ function CansCarousel({ active, total, stageRef }) {
 }
 
 function Header() {
+  const [menuOpen, setMenuOpen] = useState(false);
+  // Flipped by the first tap on the burger, never in an effect: that keeps the
+  // portal (and its document reference) strictly client-side, while leaving it
+  // mounted afterwards so AnimatePresence can still run the close animation.
+  const [everOpened, setEverOpened] = useState(false);
+
+  // Escape closes the sheet, and page scroll is frozen while it is up so a
+  // touch drag over the overlay cannot scroll the pinned sections behind it.
+  useEffect(() => {
+    if (!menuOpen) return;
+    const onKey = (e) => e.key === "Escape" && setMenuOpen(false);
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    window.addEventListener("keydown", onKey);
+    return () => {
+      document.body.style.overflow = prevOverflow;
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [menuOpen]);
+
   return (
-    <header className="absolute top-0 left-0 right-0 z-30 px-4 md:px-6 pt-4 md:pt-5 pointer-events-none hero-entrance">
+    <header className="absolute top-0 left-0 right-0 z-30 px-3 md:px-6 pt-3 md:pt-5 pointer-events-none hero-entrance">
       <div
-        className="mx-auto max-w-[1320px] flex items-center gap-3 pl-3 pr-3 md:pr-6 py-2 rounded-full backdrop-blur-md pointer-events-auto"
+        className="mx-auto max-w-[1320px] flex items-center gap-2 md:gap-3 pl-2.5 md:pl-3 pr-2.5 md:pr-6 py-1.5 md:py-2 rounded-full backdrop-blur-md pointer-events-auto"
         style={{
           background: "rgba(217, 217, 217, 0.5)",
           border: "1px solid rgba(255,255,255,0.22)",
@@ -460,19 +560,19 @@ function Header() {
           aria-label="Shilajit Energy home"
           className="flex items-center gap-2 shrink-0 transition-transform duration-300 hover:scale-105"
         >
-          {/* Logo's natural ratio is 529×191 (wide horizontal). Passing the
-              actual intrinsic dimensions to next/image gives the browser the
-              correct aspect ratio up-front (no CLS), and h-14 md:h-16 w-auto
-              then scales the image by height with the natural width — no more
-              letterboxing inside a square wrapper. */}
+          {/* Logo natural ratio is 529x191 (wide horizontal). Passing the actual
+              intrinsic dimensions to next/image gives the browser the correct
+              aspect ratio up-front (no CLS), and h-10 md:h-16 w-auto then scales
+              the image by height with the natural width. The phone step is h-10
+              so the pill stays a slim bar instead of eating the hero. */}
           <Image
             src="/asset/logo.png"
             alt="Shilajit Energy"
             width={529}
             height={191}
-            sizes="(max-width: 768px) 160px, 180px"
+            sizes="(max-width: 768px) 120px, 180px"
             priority
-            className="h-14 md:h-16 w-auto object-contain"
+            className="h-10 md:h-16 w-auto object-contain"
           />
         </a>
 
@@ -492,13 +592,86 @@ function Header() {
         <button
           type="button"
           aria-label="Open menu"
-          className="lg:hidden ml-auto w-10 h-10 rounded-full grid place-items-center text-white"
+          aria-expanded={menuOpen}
+          aria-controls="mobile-nav"
+          onClick={() => { setEverOpened(true); setMenuOpen(true); }}
+          className="lg:hidden ml-auto w-10 h-10 rounded-full grid place-items-center text-white transition-transform active:scale-95"
           style={{ background: "rgba(0,0,0,0.28)" }}
         >
           <span className="relative block w-5 h-[2px] bg-white before:content-[''] before:absolute before:left-0 before:right-0 before:-top-1.5 before:h-[2px] before:bg-white after:content-[''] after:absolute after:left-0 after:right-0 after:top-1.5 after:h-[2px] after:bg-white" />
         </button>
       </div>
+
+      <MobileMenu enabled={everOpened} open={menuOpen} onClose={() => setMenuOpen(false)} />
     </header>
+  );
+}
+
+// Portalled to <body> on purpose: the hero lives inside the landing wrapper
+// `isolate` stacking context at z-10, below the shared morphing can at z-25, so
+// a sheet rendered in place would be painted underneath the can.
+function MobileMenu({ enabled, open, onClose }) {
+  if (!enabled) return null;
+
+  return createPortal(
+    <AnimatePresence>
+      {open && (
+        <motion.div
+          id="mobile-nav"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          transition={{ duration: 0.25 }}
+          className="fixed inset-0 z-[100] lg:hidden"
+        >
+          <div
+            className="absolute inset-0 bg-black/70 backdrop-blur-sm"
+            onClick={onClose}
+          />
+          <motion.nav
+            initial={{ y: "-100%" }}
+            animate={{ y: "0%" }}
+            exit={{ y: "-100%" }}
+            transition={{ duration: 0.4, ease: [0.22, 0.61, 0.36, 1] }}
+            className="relative pt-safe bg-[#12130F] border-b border-white/15 px-6 pb-8 shadow-2xl"
+          >
+            <div className="flex items-center justify-between py-4">
+              <Image
+                src="/asset/logo.png"
+                alt="Shilajit Energy"
+                width={529}
+                height={191}
+                sizes="120px"
+                className="h-9 w-auto object-contain"
+              />
+              <button
+                type="button"
+                aria-label="Close menu"
+                onClick={onClose}
+                className="w-10 h-10 rounded-full grid place-items-center text-white transition-transform active:scale-95"
+                style={{ background: "rgba(255,255,255,0.12)" }}
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <ul className="flex flex-col">
+              {NAV_LINKS.map((label) => (
+                <li key={label}>
+                  <a
+                    href="#"
+                    onClick={onClose}
+                    className="block py-3.5 text-white text-lg font-bold tracking-tight border-b border-white/10 last:border-b-0"
+                  >
+                    {label}
+                  </a>
+                </li>
+              ))}
+            </ul>
+          </motion.nav>
+        </motion.div>
+      )}
+    </AnimatePresence>,
+    document.body
   );
 }
 
@@ -509,27 +682,27 @@ function NavControls({ onPrev, onNext }) {
         type="button"
         aria-label="Previous flavor"
         onClick={onPrev}
-        className="group absolute left-4 md:left-10 top-1/2 -translate-y-1/2 z-30 w-12 h-12 md:w-14 md:h-14 rounded-full grid place-items-center backdrop-blur-md transition-all duration-300 hover:scale-110 active:scale-95"
+        className="group absolute left-2 md:left-10 top-1/2 -translate-y-1/2 z-30 w-10 h-10 md:w-14 md:h-14 rounded-full grid place-items-center backdrop-blur-md transition-all duration-300 hover:scale-110 active:scale-95"
         style={{
           background: "rgba(255,255,255,0.16)",
           border: "1px solid rgba(255,255,255,0.28)",
           boxShadow: "0 10px 24px rgba(0,0,0,0.25)",
         }}
       >
-        <ChevronLeft className="text-white w-6 h-6 md:w-7 md:h-7 transition-transform duration-300 group-hover:-translate-x-0.5" />
+        <ChevronLeft className="text-white w-5 h-5 md:w-7 md:h-7 transition-transform duration-300 group-hover:-translate-x-0.5" />
       </button>
       <button
         type="button"
         aria-label="Next flavor"
         onClick={onNext}
-        className="group absolute right-4 md:right-10 top-1/2 -translate-y-1/2 z-30 w-12 h-12 md:w-14 md:h-14 rounded-full grid place-items-center backdrop-blur-md transition-all duration-300 hover:scale-110 active:scale-95"
+        className="group absolute right-2 md:right-10 top-1/2 -translate-y-1/2 z-30 w-10 h-10 md:w-14 md:h-14 rounded-full grid place-items-center backdrop-blur-md transition-all duration-300 hover:scale-110 active:scale-95"
         style={{
           background: "rgba(255,255,255,0.16)",
           border: "1px solid rgba(255,255,255,0.28)",
           boxShadow: "0 10px 24px rgba(0,0,0,0.25)",
         }}
       >
-        <ChevronRight className="text-white w-6 h-6 md:w-7 md:h-7 transition-transform duration-300 group-hover:translate-x-0.5" />
+        <ChevronRight className="text-white w-5 h-5 md:w-7 md:h-7 transition-transform duration-300 group-hover:translate-x-0.5" />
       </button>
     </>
   );
@@ -537,7 +710,7 @@ function NavControls({ onPrev, onNext }) {
 
 function Pagination({ active, setActive }) {
   return (
-    <div className="absolute bottom-7 left-1/2 -translate-x-1/2 z-30 flex items-center gap-2.5">
+    <div className="absolute bottom-4 md:bottom-7 left-1/2 -translate-x-1/2 z-30 flex items-center gap-2 md:gap-2.5 pb-safe">
       {FLAVORS.map((f, i) => (
         <button
           key={f.id}

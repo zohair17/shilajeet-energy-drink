@@ -3,6 +3,7 @@
 import { useEffect, useRef } from "react";
 import gsap from "gsap";
 import { ScrollTrigger } from "gsap/ScrollTrigger";
+import useIsMobile from "./useIsMobile";
 
 const BENEFITS = [
   "Boost Vitality",
@@ -18,6 +19,7 @@ const BENEFITS = [
 export default function BenefitsSection({ sectionRef, slotRef }) {
   const headingRef = useRef(null);
   const tagsContainerRef = useRef(null);
+  const isMobile = useIsMobile();
 
   useEffect(() => {
     if (!sectionRef?.current) return;
@@ -29,15 +31,23 @@ export default function BenefitsSection({ sectionRef, slotRef }) {
       // nearly settled into the left slot.
       //
       // Timing rationale: the LandingExperience can-morph runs across
-      // [sectionTop - 0.6*vh, sectionTop - 0.1*vh]. `start: "top 25%"` lands at
-      // ~75% of that window, so the can is already anchored on the left when
-      // the heading wipes in from the right and the tags slide out from
-      // behind it.
+      // [sectionTop - morphIn*vh, sectionTop - morphOut*vh]. `start: "top 25%"`
+      // lands near the end of that window, so the can is already anchored when
+      // the heading wipes in from the right and the tags slide out from behind
+      // it. Phones start a touch earlier because the stacked layout puts the
+      // heading above the can rather than beside it.
+      //
+      // Travel distances are viewport-relative on mobile: a fixed 280px/360px
+      // slide is most of a phone screen, which both reads as a lurch and pushes
+      // the elements far enough out that the clipped section shows empty space.
+      const headingTravel = isMobile ? 120 : 280;
+      const tagTravel = isMobile ? -160 : -360;
+
       const tl = gsap.timeline({
         scrollTrigger: {
           trigger: sectionRef.current,
-          start: "top 25%",
-          end: "top -25%",
+          start: isMobile ? "top 45%" : "top 25%",
+          end: isMobile ? "top -15%" : "top -25%",
           scrub: 1,
         },
       });
@@ -46,7 +56,7 @@ export default function BenefitsSection({ sectionRef, slotRef }) {
       // gives the wipe a confident finish.
       tl.fromTo(
         headingRef.current,
-        { x: 280, opacity: 0, scale: 0.9 },
+        { x: headingTravel, opacity: 0, scale: 0.9 },
         { x: 0, opacity: 1, scale: 1, ease: "power3.out" }
       );
 
@@ -55,23 +65,23 @@ export default function BenefitsSection({ sectionRef, slotRef }) {
       const tags = tagsContainerRef.current.querySelectorAll(".benefit-tag");
       tl.fromTo(
         tags,
-        { x: -360, opacity: 0 },
-        { x: 0, opacity: 1, stagger: 0.18, ease: "power2.out" },
+        { x: tagTravel, opacity: 0 },
+        { x: 0, opacity: 1, stagger: isMobile ? 0.12 : 0.18, ease: "power2.out" },
         "<0.1"
       );
     });
 
     return () => ctx.revert();
-  }, [sectionRef]);
+  }, [sectionRef, isMobile]);
 
   return (
     <section
       ref={sectionRef}
-      className="relative w-full min-h-screen overflow-hidden z-10"
+      className="relative w-full min-h-[100svh] md:min-h-screen overflow-hidden z-10"
     >
-      <div className="relative mx-auto max-w-[1320px] px-6 md:px-12 lg:px-16 py-24 md:py-28 grid grid-cols-1 lg:grid-cols-2 gap-12 lg:gap-8 items-center min-h-screen">
+      <div className="relative mx-auto max-w-[1320px] px-5 md:px-12 lg:px-16 py-16 md:py-28 grid grid-cols-1 lg:grid-cols-2 gap-6 md:gap-12 lg:gap-8 items-center min-h-[100svh] md:min-h-screen">
         {/* LEFT COLUMN — anchor slot for the morphing can */}
-        <div className="relative w-full h-[60vh] min-h-[460px] lg:h-[78vh] flex items-center justify-center order-2 lg:order-1">
+        <div className="relative w-full h-[46svh] min-h-[300px] md:h-[60vh] md:min-h-[460px] lg:h-[78vh] flex items-center justify-center order-2 lg:order-1">
           <div
             ref={slotRef}
             aria-hidden="true"
@@ -80,12 +90,11 @@ export default function BenefitsSection({ sectionRef, slotRef }) {
         </div>
 
         {/* RIGHT COLUMN — heading + benefits list (rendered behind the can z-wise) */}
-        <div className="relative flex flex-col gap-7 md:gap-10 order-1 lg:order-2 lg:pl-4 z-0">
+        <div className="relative flex flex-col gap-5 md:gap-10 order-1 lg:order-2 lg:pl-4 z-0">
           <h2
             ref={headingRef}
-            className="font-black uppercase text-white leading-[0.95] tracking-[-0.02em] text-right"
+            className="font-black uppercase text-white leading-[0.95] tracking-[-0.02em] text-right text-[clamp(38px,11vw,58px)] md:text-[clamp(48px,7vw,108px)]"
             style={{
-              fontSize: "clamp(48px, 7vw, 108px)",
               textShadow: "0 6px 30px rgba(0,0,0,0.35)",
               willChange: "transform, opacity",
             }}
@@ -97,15 +106,16 @@ export default function BenefitsSection({ sectionRef, slotRef }) {
 
           <div
             ref={tagsContainerRef}
-            className="flex flex-col gap-4 md:gap-5 items-end"
+            className="flex flex-col gap-3 md:gap-5 items-end"
           >
             {BENEFITS.map((label, i) => (
               <div
                 key={label}
-                className="benefit-tag font-semibold text-white tracking-tight text-right whitespace-nowrap"
+                className="benefit-tag font-semibold text-white tracking-tight text-right whitespace-nowrap text-[clamp(16px,4.6vw,22px)] md:text-[clamp(18px,2.2vw,32px)]"
                 style={{
-                  fontSize: "clamp(18px, 2.2vw, 32px)",
-                  paddingRight: `${i * 14}px`,
+                  // The staircase indent is a desktop flourish; at phone width
+                  // it would eat the right margin the tags are aligned to.
+                  paddingRight: `${i * (isMobile ? 5 : 14)}px`,
                   textShadow: "0 4px 20px rgba(0,0,0,0.4)",
                   willChange: "transform, opacity",
                 }}
