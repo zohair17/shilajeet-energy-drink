@@ -76,3 +76,34 @@ body {
 .mb-safe {
   margin-bottom: env(safe-area-inset-bottom, 0px);
 }
+
+/* Smooth scroll (Lenis). While it is stopped — during the intro, or with the
+   mobile menu open — the page cannot scroll at all. */
+html.lenis,
+html.lenis body {
+  height: auto;
+}
+
+.lenis:not(.lenis-autoToggle).lenis-stopped {
+  overflow: clip;
+}
+
+.lenis [data-lenis-prevent],
+.lenis [data-lenis-prevent-wheel],
+.lenis [data-lenis-prevent-touch] {
+  overscroll-behavior: contain;
+}
+
+.lenis.lenis-smooth iframe {
+  pointer-events: none;
+}
+
+/* Loading indicator shown while the 3D scene downloads. */
+@keyframes loader-bar {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(300%);
+  }
+}

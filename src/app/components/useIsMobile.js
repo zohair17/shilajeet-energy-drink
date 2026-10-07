@@ -1,25 +1,36 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useSyncExternalStore } from "react";
 
 // Single source of truth for the mobile breakpoint. It matches Tailwind's `md`
 // boundary (768px) so the JS-driven GSAP/framer animations branch on exactly
 // the same line as the `max-md:` utility classes used for layout.
 export const MOBILE_QUERY = "(max-width: 767px)";
 
+// Below Tailwind's `lg`, or any tall screen, the scroll sections stack their
+// copy above and below the can instead of beside it. The 3D scene uses the
+// same rule (experience/motion.js `compact`).
+export const COMPACT_QUERY = "(max-width: 1023px), (max-aspect-ratio: 17/20)";
+
+// `false` on the server and during hydration, so SSR emits the desktop tree;
+// React then re-renders with the real value. Consumers keep the result in
+// their effect deps so timelines rebuild when it changes.
+function useMediaQuery(query) {
+  return useSyncExternalStore(
+    (onChange) => {
+      const mq = window.matchMedia(query);
+      mq.addEventListener("change", onChange);
+      return () => mq.removeEventListener("change", onChange);
+    },
+    () => window.matchMedia(query).matches,
+    () => false
+  );
+}
+
 export default function useIsMobile() {
-  // Starts `false` so SSR and the first client render emit the untouched
-  // desktop tree — the effect flips it before any timeline is built, and every
-  // consumer keeps `isMobile` in its effect deps so the timelines rebuild.
-  const [isMobile, setIsMobile] = useState(false);
+  return useMediaQuery(MOBILE_QUERY);
+}
 
-  useEffect(() => {
-    const mq = window.matchMedia(MOBILE_QUERY);
-    const sync = () => setIsMobile(mq.matches);
-    sync();
-    mq.addEventListener("change", sync);
-    return () => mq.removeEventListener("change", sync);
-  }, []);
-
-  return isMobile;
+export function useIsCompact() {
+  return useMediaQuery(COMPACT_QUERY);
 }
